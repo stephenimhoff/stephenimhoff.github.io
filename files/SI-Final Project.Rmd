@@ -1,0 +1,173 @@
+---
+title: "SI-Final Project"
+output: html_notebook
+---
+
+
+
+```{r}
+setwd("~/Data Analytics-R") # My directory where I store the data
+data = read.csv("game_logs.csv", header = T)
+```
+
+```{r}
+names(data)
+```
+
+```{r}
+summary(data)
+```
+
+```{r}
+#does scoring change over time?
+
+totalruns = data$v_score + data$h_score
+totalhrs = data$v_homeruns + data$h_homeruns
+totalhits = data$v_hits + data$h_hits
+data_2 = data.frame(data, totalruns, totalhrs, totalhits)
+
+year = substr(data_2$date, start = 1, stop = 4)
+data3 = data.frame(data_2, year)
+#plot average runs per game over time
+  #do by year
+library(ggplot2)
+#create average annual runs and fill it with the average runs by year, plot
+data3$avgannruns <- NA
+avgannnualruns = aggregate(totalruns~year, data3,mean)
+plot(avgannnualruns, xlab = "Year", ylab = "Average runs per game")
+
+#same with average Home runs and hits
+avghrs = aggregate(totalhrs~year, data3,mean)
+plot(avghrs, xlab = "Year", ylab = "Average Home Runs per Game")
+avghits = aggregate(totalhits~year, data3, mean)
+plot(avghits)
+
+#is there a statistically significant difference in hits/walks in the NL vs AL? (based on when the DH was instated)
+#hits analysis
+leaguehits = aggregate(totalhits~h_league, data3, mean)
+#this analysis shows that there are on average .2 more hits in the AL vs the NL. Let's test if that is statistically significant
+hitsdata = data.frame(data3$totalhits, data3$h_league)
+hitsleague = rep(0, nrow(hitsdata))
+#assign 1 to NL and AL values
+hitsleague[grepl("NL",hitsdata$data3.h_league, fixed = TRUE)] = 1
+hitsleague[grepl("AL",hitsdata$data3.h_league, fixed = TRUE)] = 2
+hitsdata = data.frame(hitsdata, hitsleague)
+hitssub = apply(hitsdata, 1, function(row) all(row != 0))
+hitsdata = hitsdata[hitssub,]
+#run two sided t test on the data to see if there is a significant difference between the leagues
+t.test(hitsdata$data3.totalhits ~ hitsdata$data3.h_league, alternative = "two.sided", conf.level = .95)
+qqnorm(hitsdata$data3.totalhits) 
+#test for normaility looks good
+#there is a minor but statistically very significant difference in the means of hits between the AL and NL
+#hypothesis testing and plots
+```
+
+```{r}
+#does pitchers used correlate with better performance?
+
+#is there a correlation between number of pitchers used and the runs scored by the opposite team
+#add in strikeouts, hit by pitch, walks
+cleand2 = data.frame(na.omit(data3$v_pitchers_used), na.omit(data3$h_pitchers_used), na.omit(data3$h_hits), na.omit(data3$v_hits), na.omit(data3$v_strikeouts), na.omit(data3$h_strikeouts), na.omit(data3$v_hit_by_pitch), na.omit(data3$h_hit_by_pitch), na.omit(data3$v_walks), na.omit(data3$h_walks))
+#rename
+names(cleand2)[1] = "v_pitchers_used"
+names(cleand2)[2] = "h_pitchers_used"
+names(cleand2)[3] = "h_hits"
+names(cleand2)[4] = "v_hits"
+names(cleand2)[5] = "v_strikeouts"
+names(cleand2)[6] = "h_strikeouts"
+names(cleand2)[7] = "v_hit_by_pitch"
+names(cleand2)[8] = "h_hit_by_pitch"
+names(cleand2)[9] = "v_walks"
+names(cleand2)[10] = "h_walks"
+
+pc1 = princomp(cleand2[,c("v_pitchers_used", "h_hits")])
+pc2 = princomp(cleand2[,c("h_pitchers_used", "v_hits")])
+summary(pc1)
+summary(pc2)
+cor(cleand2$v_pitchers_used, cleand2$h_hits, method = "pearson")
+#correlation only .33
+cor(cleand2$h_pitchers_used, cleand2$v_hits, method = "pearson")
+library(corrplot)
+cor(cleand2$v_pitchers_used, cleand2$h_strikeouts, method = "pearson")
+#.35
+cor(cleand2$h_pitchers_used, cleand2$v_strikeouts, method = "pearson")
+#.34
+corrplot.mixed(cor(cleand2),lower = "number", upper = "ellipse")
+#results are disappointing, I'm not noticing significant changes in any result given a different number of pitchers used
+# more pitchers used might be correlated with more hits because the pitcher has to get pulled if they give up hits (a sign of traditions being followed) as opposed to having more pitchers actually improving performance
+#correlation higher at .4, home pitchers have an advantage
+
+```
+
+```{r}
+#linear 
+library(leaps)
+runmodel = regsubsets(h_score ~ v_pitchers_used + v_errors + v_balks + v_passed_balls + h_stolen_bases + h_hits + h_walks + h_intentional.walks + h_homeruns + h_strikeouts, data = data3)
+review = summary(runmodel)
+review
+#use pitchersused, errors, hits, walks, home runs, strikeouts
+bestmodel=lm(h_score ~ v_pitchers_used + v_errors + h_hits + h_walks + h_homeruns + h_strikeouts, data = data3)
+summary(bestmodel)
+#model: runs scored = -2.4 + .2*pitchers used by opposing team + .5*opposing errors + .5*hits + .3*walks + .85*homeruns - .08*Strikeouts
+
+#will test the inverse of this data to see if it works for opposing teams as well, also will validate results
+awaymodel = lm(v_score ~ h_pitchers_used + + h_errors + v_hits + v_walks + v_homeruns + v_strikeouts, data = data3)
+summary(awaymodel)
+#model: runs scored = -2.6 + .2*pitchers used by opposing team + .5*opposing errors + .5*errors + .5*hits + .3*walks + .79*home runs -.05*strikeouts
+
+#results are incredibly similar to previous model and indicate the validity of the model
+#predict runs scored by a team based on: errors, passed balls, stolen bases, balks
+#do model selection to create the optimal model measuring baseball success
+```
+
+```{r}
+data7 = read.csv("GL2007.csv", header = T)
+#data using: v_score, v_hits, v_doubles, v_triples, v_homeruns, v_Hit_by_pitch, v_walks, v_strikeouts, h_starting_pitcher_name
+data8 = data.frame(na.omit(data7[c(10,23,24,25,26,30,31,33,105)]))
+scoreagg = aggregate(v_score ~ h_starting_pitcher_name, data8, mean)
+hitsagg = aggregate(v_hits ~ h_starting_pitcher_name, data8, mean)
+doubagg = aggregate(v_doubles~ h_starting_pitcher_name, data8, mean)
+tripagg = aggregate(v_triples~ h_starting_pitcher_name, data8, mean)
+hragg = aggregate(v_homeruns ~ h_starting_pitcher_name, data8, mean)
+hbpagg = aggregate(v_hit_by_pitch ~ h_starting_pitcher_name, data8, mean)
+walksagg = aggregate(v_walks~ h_starting_pitcher_name, data8, mean)
+SOagg = aggregate(v_strikeouts~ h_starting_pitcher_name, data8, mean)
+
+clustdata = data.frame(scoreagg$h_starting_pitcher_name, scoreagg$v_score,hitsagg$v_hits,doubagg$v_doubles,tripagg$v_triples,hragg$v_homeruns,hbpagg$v_hit_by_pitch,walksagg$v_walks,SOagg$v_strikeouts)
+
+
+library(NbClust)
+d = dist(as.matrix(clustdata[,2:9]), method = "euclidean")
+hc_1 = hclust(d, method = "single", members = as.factor(clustdata[,1]))
+plot(hc_1)
+#unfortunately, the dataset is far too large to make anything of this mess
+#I'm going to massively limit my sample size in order to create some meaningful data
+
+data9 = read.csv("clust.csv", header = T)
+#data using: v_score, v_hits, v_doubles, v_triples, v_homeruns, v_Hit_by_pitch, v_walks, v_strikeouts, h_starting_pitcher_name
+data10 = data.frame(na.omit(data9[c(10,23,24,25,26,30,31,33,105)]))
+scoreagg = aggregate(v_score ~ h_starting_pitcher_name, data10, mean)
+hitsagg = aggregate(v_hits ~ h_starting_pitcher_name, data10, mean)
+doubagg = aggregate(v_doubles~ h_starting_pitcher_name, data10, mean)
+tripagg = aggregate(v_triples~ h_starting_pitcher_name, data10, mean)
+hragg = aggregate(v_homeruns ~ h_starting_pitcher_name, data10, mean)
+hbpagg = aggregate(v_hit_by_pitch ~ h_starting_pitcher_name, data10, mean)
+walksagg = aggregate(v_walks~ h_starting_pitcher_name, data10, mean)
+SOagg = aggregate(v_strikeouts~ h_starting_pitcher_name, data10, mean)
+
+clustdata2 = data.frame(scoreagg$h_starting_pitcher_name, scoreagg$v_score,hitsagg$v_hits,doubagg$v_doubles,tripagg$v_triples,hragg$v_homeruns,hbpagg$v_hit_by_pitch,walksagg$v_walks,SOagg$v_strikeouts)
+
+d2 = dist(as.matrix(clustdata2[,2:9]), method = "euclidean")
+hc_2 = hclust(d2, method = "single", members = as.factor(clustdata2[,1]))
+plot(hc_2, labels = clustdata2[,1], hang = -1)
+cluststd = scale(clustdata2[,2:9])
+nclust = NbClust(cluststd, distance = "euclidean", min.nc = 2, max.nc = 5, method = "single")
+#3 clusters seems ideal
+plot(hc_2, labels = clustdata2[,1], hang = -1)
+rect.hclust(hc_2, k = 3)
+
+#this is a plot of the mean pitchers used per game
+avgpitchers = aggregate(h_pitchers_used~year, data3, mean)
+plot(avgpitchers, ylab = "Mean Pitchers Used", xlab = "Year")
+```
+
